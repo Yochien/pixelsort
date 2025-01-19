@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -11,8 +12,8 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
+
+	"rsc.io/getopt"
 
 	"golang.org/x/image/tiff"
 )
@@ -168,19 +169,21 @@ func sortSpans(src image.Image, spans []Span) image.Image {
 	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
 
 	for _, span := range spans {
-		c := make([]color.Color, span.len)
-		for i := range span.len {
-			c[i] = src.At(span.idx+i, span.row)
-		}
+		if span.len > 1 {
+			c := make([]color.Color, span.len)
+			for i := range span.len {
+				c[i] = src.At(span.idx+i, span.row)
+			}
 
-		sort.Slice(c, func(i, j int) bool {
-			a := getHue(c[i])
-			b := getHue(c[j])
-			return a > b
-		})
+			sort.Slice(c, func(i, j int) bool {
+				a := getHue(c[i])
+				b := getHue(c[j])
+				return a > b
+			})
 
-		for i := range span.len {
-			out.Set(span.idx+i, span.row, c[i])
+			for i := range span.len {
+				out.Set(span.idx+i, span.row, c[i])
+			}
 		}
 	}
 
@@ -188,68 +191,59 @@ func sortSpans(src image.Image, spans []Span) image.Image {
 }
 
 func main() {
-	var filepath string
-	lo := lowThreshold
-	hi := highThreshold
-	inverted := false
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: <filepath>")
-		os.Exit(1)
-	}
-	if len(os.Args) > 2 && len(os.Args) != 5 {
-		fmt.Println("Usage: <filepath> <low threshold> <high threshold> <inverted>")
-		os.Exit(1)
-	} else if len(os.Args) == 2 {
-		filepath = os.Args[1]
-	} else if len(os.Args) == 5 {
-		filepath = os.Args[1]
-		i1, err := strconv.Atoi(os.Args[2])
-		if err != nil {
-			fmt.Println("Low threshold should be a whole number of 0 or greater.")
-			os.Exit(1)
-		}
-		lo = i1
-		i2, err := strconv.Atoi(os.Args[3])
-		if err != nil {
-			fmt.Println("High threshold should be a whole number of 0 or greater.")
-			os.Exit(1)
-		}
-		hi = i2
-		i3 := strings.ToLower(os.Args[4])
-		switch i3 {
-		case "y", "yes", "t", "true":
-			inverted = true
-		case "n", "no", "f", "false":
-			inverted = false
-		default:
-			fmt.Println("Use the format y/n to specify an inversion of the threshold mask.")
-			os.Exit(1)
-		}
+	flag.Usage = func() {
+		w := flag.CommandLine.Output()
+
+		fmt.Fprintf(w, "Usage: [options] <filename>\nOptions:\n")
+		getopt.PrintDefaults()
 	}
 
-	var preserveFormat bool = false
+	lowerthreshold := flag.Int("l", lowThreshold, "Lower perceived luminance threshold when generating a mask for the image.")
+	upperthreshold := flag.Int("u", highThreshold, "Upper perceived luminance threshold when generating a mask for the image.")
+	minspanlength := flag.Int("s", 2, "The minimum allowed length of span that should be sorted.")
+	keepmask := flag.Bool("m", false, "Whether to produce an output file for the generated mask.")
+	inverted := flag.Bool("i", false, "Whether the mask should be inverted.")
+	preserveformat := flag.Bool("p", false, "Produce output in the same image format of the provided input.")
+
+	getopt.Aliases(
+		"l", "lower-threshold",
+		"u", "upper-threshold",
+		"s", "minimum-span-length",
+		"m", "keep-mask",
+		"i", "invert",
+		"p", "preserve-format",
+	)
+
+	getopt.Parse()
+	if len(flag.Args()) > 1 {
+		flag.Usage()
+		os.Exit(0)
+	}
+	filepath := flag.Args()[0]
 
 	img, format, err := decodeImage(filepath)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	mask, err := generateLuminanceMask(img, lo, hi, inverted)
+	mask, err := generateLuminanceMask(img, *lowerthreshold, *upperthreshold, *inverted)
 	if err != nil {
 		panic(err.Error())
 	}
-	spans := generateSortSpans(mask, 2)
+	spans := generateSortSpans(mask, *minspanlength)
 	out := sortSpans(img, spans)
 
-	if !preserveFormat {
+	if !*preserveformat {
 		format = "png"
-	}
-	err = encodeImage(fmt.Sprintf("./output/mask.%s", format), mask, format)
-	if err != nil {
-		panic(err.Error())
 	}
 	err = encodeImage(fmt.Sprintf("./output/out.%s", format), out, format)
 	if err != nil {
 		panic(err.Error())
+	}
+	if *keepmask {
+		err = encodeImage(fmt.Sprintf("./output/mask.%s", format), mask, format)
+		if err != nil {
+			panic(err.Error())
+		}
 	}
 }
