@@ -217,7 +217,7 @@ func main() {
 	)
 
 	getopt.Parse()
-	if len(flag.Args()) > 1 {
+	if len(flag.Args()) != 1 {
 		flag.Usage()
 		os.Exit(0)
 	}
