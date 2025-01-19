@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/tiff"
 )
 
+// https://reintech.io/blog/a-guide-to-gos-image-package-manipulating-and-processing-images
 func decodeImage(filename string) (image.Image, string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -33,6 +34,7 @@ func decodeImage(filename string) (image.Image, string, error) {
 	return img, format, nil
 }
 
+// https://reintech.io/blog/a-guide-to-gos-image-package-manipulating-and-processing-images
 func encodeImage(filename string, img image.Image, format string) error {
 	file, err := os.Create(filename)
 	if err != nil {
