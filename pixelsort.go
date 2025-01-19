@@ -204,10 +204,6 @@ func sortSpans(src image.Image, spans []Span, reverse bool) image.Image {
 
 			for i := range span.len {
 				out.Set(span.idx+i, span.row, c[i])
-				_, _, _, alpha := c[i].RGBA()
-				if alpha == 0 {
-					out.Set(span.idx+i, span.row, RGBAMagenta)
-				}
 			}
 		}
 	}
