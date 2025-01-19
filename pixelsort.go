@@ -62,6 +62,11 @@ const perceivedR float64 = 0.299
 const perceivedG float64 = 0.587
 const perceivedB float64 = 0.114
 
+var RGBAWhite color.RGBA = color.RGBA{255, 255, 255, 255}
+var RGBABlack color.RGBA = color.RGBA{0, 0, 0, 255}
+var RGBAGreen color.RGBA = color.RGBA{0, 255, 0, 255}
+var RGBAMagenta color.RGBA = color.RGBA{255, 0, 255, 255}
+
 func generateLuminanceMask(original image.Image, lo int, hi int, invert bool) (image.Image, error) {
 	if lo > hi {
 		return nil, errors.New("Low threshold must be less than high threshold.")
@@ -78,15 +83,15 @@ func generateLuminanceMask(original image.Image, lo int, hi int, invert bool) (i
 			perceivedLuminance := math.Sqrt(perceivedR*math.Pow(float64(r), 2) + perceivedG*math.Pow(float64(g), 2) + perceivedB*math.Pow(float64(b), 2))
 			if perceivedLuminance < float64(lo) || perceivedLuminance > float64(hi) {
 				if !invert {
-					mask.Set(x, y, color.Black)
+					mask.Set(x, y, RGBABlack)
 				} else {
-					mask.Set(x, y, color.White)
+					mask.Set(x, y, RGBAWhite)
 				}
 			} else {
 				if !invert {
-					mask.Set(x, y, color.White)
+					mask.Set(x, y, RGBAWhite)
 				} else {
-					mask.Set(x, y, color.Black)
+					mask.Set(x, y, RGBABlack)
 				}
 			}
 		}
@@ -104,11 +109,12 @@ type Span struct {
 
 func generateSortSpans(mask image.Image, minSpanLen int) []Span {
 	var spans []Span = make([]Span, 0)
-	var keep bool = mask.At(mask.Bounds().Min.X, mask.Bounds().Min.Y) == color.RGBA{255, 255, 255, 255}
-	span := Span{mask.At(mask.Bounds().Min.X, mask.Bounds().Min.Y), mask.Bounds().Min.Y, mask.Bounds().Min.X, 1}
 
 	for y := range mask.Bounds().Max.Y {
-		for x := range mask.Bounds().Max.X {
+		var keep bool = mask.At(0, y) == RGBAWhite
+		var span Span = Span{mask.At(0, y), y, 0, 0}
+
+		for x := 0; x < mask.Bounds().Dx(); x++ {
 			if mask.At(x, y) == span.color {
 				span.len++
 			} else {
@@ -118,22 +124,30 @@ func generateSortSpans(mask image.Image, minSpanLen int) []Span {
 				span = Span{mask.At(x, y), y, x, 1}
 				keep = !keep
 			}
+
+			if x == mask.Bounds().Dx()-1 && keep {
+				spans = append(spans, span)
+			}
 		}
 	}
 
 	return spans
 }
 
-func debugColorSpans(mask image.Image, spans []Span) image.Image {
-	img := image.NewRGBA(mask.Bounds())
+func debugColorSpans(mask image.Image, spans []Span) {
+	b := mask.Bounds()
+	img := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 
 	for _, span := range spans {
-		for i := span.idx; i < span.idx+span.len; i++ {
-			img.Set(i, span.row, color.RGBA{255, 0, 255, 255})
+		for i := range span.len {
+			img.Set(span.idx+i, span.row, RGBAGreen)
 		}
 	}
 
-	return img
+	err := encodeImage(fmt.Sprintf("./output/spanDBG.png"), img, "png")
+	if err != nil {
+		panic(err.Error())
+	}
 }
 
 // https://stackoverflow.com/questions/23090019/fastest-formula-to-get-hue-from-rgb
@@ -166,8 +180,9 @@ func getHue(c color.Color) float64 {
 	return math.Round(hue)
 }
 
-func sortSpans(src image.Image, spans []Span) image.Image {
-	out := image.NewRGBA(src.Bounds())
+func sortSpans(src image.Image, spans []Span, reverse bool) image.Image {
+	b := src.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
 
 	for _, span := range spans {
@@ -180,11 +195,19 @@ func sortSpans(src image.Image, spans []Span) image.Image {
 			sort.Slice(c, func(i, j int) bool {
 				a := getHue(c[i])
 				b := getHue(c[j])
-				return a > b
+				if !reverse {
+					return a > b
+				} else {
+					return a < b
+				}
 			})
 
 			for i := range span.len {
 				out.Set(span.idx+i, span.row, c[i])
+				_, _, _, alpha := c[i].RGBA()
+				if alpha == 0 {
+					out.Set(span.idx+i, span.row, RGBAMagenta)
+				}
 			}
 		}
 	}
@@ -203,8 +226,9 @@ func main() {
 	lowerthreshold := flag.Int("l", lowThreshold, "Lower perceived luminance threshold when generating a mask for the image.")
 	upperthreshold := flag.Int("u", highThreshold, "Upper perceived luminance threshold when generating a mask for the image.")
 	minspanlength := flag.Int("s", 2, "The minimum allowed length of span that should be sorted.")
-	keepmask := flag.Bool("m", false, "Whether to produce an output file for the generated mask.")
-	inverted := flag.Bool("i", false, "Whether the mask should be inverted.")
+	keepmask := flag.Bool("m", false, "Produce an output file for the generated mask.")
+	inverted := flag.Bool("i", false, "Invert the mask for sortable image areas.")
+	reverse := flag.Bool("r", false, "Reverse the sorting direction.")
 	preserveformat := flag.Bool("p", false, "Produce output in the same image format of the provided input.")
 
 	getopt.Aliases(
@@ -213,6 +237,7 @@ func main() {
 		"s", "minimum-span-length",
 		"m", "keep-mask",
 		"i", "invert",
+		"r", "reverse",
 		"p", "preserve-format",
 	)
 
@@ -233,7 +258,7 @@ func main() {
 		panic(err.Error())
 	}
 	spans := generateSortSpans(mask, *minspanlength)
-	out := sortSpans(img, spans)
+	out := sortSpans(img, spans, *reverse)
 
 	if !*preserveformat {
 		format = "png"
