@@ -106,6 +106,14 @@ type Span struct {
 	len int
 }
 
+type SpanType int
+
+const (
+	Horizontal SpanType = iota
+	Vertical
+	Diagonal
+)
+
 func generateHorizontalSpans(mask image.Image, minSpanLen int) []Span {
 	var spans []Span = make([]Span, 0)
 
@@ -135,13 +143,58 @@ func generateHorizontalSpans(mask image.Image, minSpanLen int) []Span {
 	return spans
 }
 
-func debugColorSpans(mask image.Image, spans []Span) {
+func generateVerticalSpans(mask image.Image, minSpanLen int) []Span {
+	var spans []Span = make([]Span, 0)
+
+	for x := range mask.Bounds().Dx() {
+		var currentColor = mask.At(x, 0)
+		var keep bool = currentColor == RGBAWhite
+		var span Span = Span{x, 0, 0}
+
+		for y := range mask.Bounds().Dy() {
+			if mask.At(x, y) == currentColor {
+				span.len++
+			} else {
+				if keep && span.len >= minSpanLen {
+					spans = append(spans, span)
+				}
+				currentColor = mask.At(x, y)
+				span = Span{x, y, 0}
+				keep = !keep
+			}
+
+			if y == mask.Bounds().Dy()-1 && keep {
+				spans = append(spans, span)
+			}
+		}
+	}
+
+	return spans
+}
+
+func debugHorizontalSpans(mask image.Image, spans []Span) {
 	b := mask.Bounds()
 	img := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 
 	for _, span := range spans {
 		for i := range span.len {
 			img.Set(span.idx+i, span.id, RGBAGreen)
+		}
+	}
+
+	err := encodeImage(fmt.Sprintf("./output/spanDBG.png"), img, "png")
+	if err != nil {
+		panic(err.Error())
+	}
+}
+
+func debugVerticalSpans(mask image.Image, spans []Span) {
+	b := mask.Bounds()
+	img := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+
+	for _, span := range spans {
+		for i := range span.len {
+			img.Set(span.id, span.idx+i, RGBAGreen)
 		}
 	}
 
@@ -253,8 +306,12 @@ func main() {
 	mask, err := generateLuminanceMask(img, *lowerthreshold, *upperthreshold, *inverted)
 	if err != nil {
 		panic(err.Error())
+
 	}
 	spans := generateHorizontalSpans(mask, *minspanlength)
+	debugHorizontalSpans(mask, spans)
+	// spans := generateVerticalSpans(mask, *minspanlength)
+	// debugVerticalSpans(mask, spans)
 	out := sortSpans(img, spans, *reverse)
 
 	if !*preserveformat {
