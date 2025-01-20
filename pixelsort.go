@@ -254,6 +254,20 @@ func generateHorizontalColorSpans(img image.Image, spans []Span) []ColorSpan {
 	return cspans
 }
 
+func generateVerticalColorSpans(img image.Image, spans []Span) []ColorSpan {
+	var cspans []ColorSpan = make([]ColorSpan, len(spans))
+
+	for _, span := range spans {
+		c := make([]color.Color, span.len)
+		for i := range span.len {
+			c[i] = img.At(span.id, span.idx+i)
+		}
+		cspans = append(cspans, ColorSpan{c, span.id, span.idx})
+	}
+
+	return cspans
+}
+
 func sortSpans(spans []ColorSpan, reverse bool) []ColorSpan {
 	var sortedSpans []ColorSpan = make([]ColorSpan, 0)
 	for _, span := range spans {
@@ -288,6 +302,20 @@ func applyHorizontalSpans(src image.Image, spans []ColorSpan) image.Image {
 	return out
 }
 
+func applyVerticalSpans(src image.Image, spans []ColorSpan) image.Image {
+	b := src.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
+
+	for _, span := range spans {
+		for i, c := range span.pixels {
+			out.Set(span.id, span.idx+i, c)
+		}
+	}
+
+	return out
+}
+
 func main() {
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
@@ -299,6 +327,7 @@ func main() {
 	lowerthreshold := flag.Int("l", lowThreshold, "Lower perceived luminance threshold when generating a mask for the image.")
 	upperthreshold := flag.Int("u", highThreshold, "Upper perceived luminance threshold when generating a mask for the image.")
 	minspanlength := flag.Int("s", 2, "The minimum allowed length of span that should be sorted.")
+	spantype := flag.Int("t", 0, "The type of sorting to do, 0: horizontal, 1: vertical, 2: diagonal.")
 	keepmask := flag.Bool("m", false, "Produce an output file for the generated mask.")
 	inverted := flag.Bool("i", false, "Invert the mask for sortable image areas.")
 	reverse := flag.Bool("r", false, "Reverse the sorting direction.")
@@ -308,6 +337,7 @@ func main() {
 		"l", "lower-threshold",
 		"u", "upper-threshold",
 		"s", "minimum-span-length",
+		"t", "span-type",
 		"m", "keep-mask",
 		"i", "invert",
 		"r", "reverse",
@@ -329,12 +359,26 @@ func main() {
 	mask, err := generateLuminanceMask(img, *lowerthreshold, *upperthreshold, *inverted)
 	if err != nil {
 		panic(err.Error())
-
 	}
-	spans := generateHorizontalSpans(mask, *minspanlength)
-	cspans := generateHorizontalColorSpans(img, spans)
-	cspans = sortSpans(cspans, *reverse)
-	out := applyHorizontalSpans(img, cspans)
+
+	var spans []Span
+	var cspans []ColorSpan
+	var out image.Image
+	switch SpanType(*spantype) {
+	case Horizontal:
+		spans = generateHorizontalSpans(mask, *minspanlength)
+		cspans = generateHorizontalColorSpans(img, spans)
+		cspans = sortSpans(cspans, *reverse)
+		out = applyHorizontalSpans(img, cspans)
+	case Vertical:
+		spans = generateVerticalSpans(mask, *minspanlength)
+		cspans = generateVerticalColorSpans(img, spans)
+		cspans = sortSpans(cspans, *reverse)
+		out = applyVerticalSpans(img, cspans)
+	default:
+		fmt.Println("Unimplemented sorting type.")
+		os.Exit(0)
+	}
 
 	if !*preserveformat {
 		format = "png"
