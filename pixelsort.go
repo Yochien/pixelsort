@@ -106,6 +106,12 @@ type Span struct {
 	len int
 }
 
+type ColorSpan struct {
+	pixels []color.Color
+	id     int
+	idx    int
+}
+
 type SpanType int
 
 const (
@@ -234,31 +240,48 @@ func getHue(c color.Color) float64 {
 	return math.Round(hue)
 }
 
-func sortSpans(src image.Image, spans []Span, reverse bool) image.Image {
-	b := src.Bounds()
-	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
+func generateHorizontalColorSpans(img image.Image, spans []Span) []ColorSpan {
+	var cspans []ColorSpan = make([]ColorSpan, len(spans))
 
 	for _, span := range spans {
-		if span.len > 1 {
-			c := make([]color.Color, span.len)
-			for i := range span.len {
-				c[i] = src.At(span.idx+i, span.id)
-			}
+		c := make([]color.Color, span.len)
+		for i := range span.len {
+			c[i] = img.At(span.idx+i, span.id)
+		}
+		cspans = append(cspans, ColorSpan{c, span.id, span.idx})
+	}
 
-			sort.Slice(c, func(i, j int) bool {
-				a := getHue(c[i])
-				b := getHue(c[j])
+	return cspans
+}
+
+func sortSpans(spans []ColorSpan, reverse bool) []ColorSpan {
+	var sortedSpans []ColorSpan = make([]ColorSpan, 0)
+	for _, span := range spans {
+		if len(span.pixels) > 1 {
+			sort.Slice(span.pixels, func(i, j int) bool {
+				a := getHue(span.pixels[i])
+				b := getHue(span.pixels[j])
 				if !reverse {
 					return a > b
 				} else {
 					return a < b
 				}
 			})
+			sortedSpans = append(sortedSpans, span)
+		}
+	}
 
-			for i := range span.len {
-				out.Set(span.idx+i, span.id, c[i])
-			}
+	return sortedSpans
+}
+
+func applyHorizontalSpans(src image.Image, spans []ColorSpan) image.Image {
+	b := src.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(out, out.Bounds(), src, src.Bounds().Min, draw.Src)
+
+	for _, span := range spans {
+		for i, c := range span.pixels {
+			out.Set(span.idx+i, span.id, c)
 		}
 	}
 
@@ -309,10 +332,9 @@ func main() {
 
 	}
 	spans := generateHorizontalSpans(mask, *minspanlength)
-	debugHorizontalSpans(mask, spans)
-	// spans := generateVerticalSpans(mask, *minspanlength)
-	// debugVerticalSpans(mask, spans)
-	out := sortSpans(img, spans, *reverse)
+	cspans := generateHorizontalColorSpans(img, spans)
+	cspans = sortSpans(cspans, *reverse)
+	out := applyHorizontalSpans(img, cspans)
 
 	if !*preserveformat {
 		format = "png"
